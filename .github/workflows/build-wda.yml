@@ -1,0 +1,80 @@
+name: Build WDA
+
+on:
+  workflow_dispatch:  # Chạy manual từ GitHub UI
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcrun simctl list devicetypes | head -5
+
+      - name: Clone WebDriverAgent
+        run: |
+          git clone https://github.com/appium/WebDriverAgent.git
+          cd WebDriverAgent
+          echo "WDA version:"
+          git log -1 --oneline
+
+      - name: Build WDA for real device (unsigned)
+        run: |
+          cd WebDriverAgent
+
+          # Build for generic iOS device (ARM64) without signing
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -derivedDataPath ./build \
+            | tail -20
+
+      - name: Package as IPA
+        run: |
+          cd WebDriverAgent
+
+          # Find the .app
+          APP_PATH=$(find ./build -name "WebDriverAgentRunner-Runner.app" -type d | head -1)
+          echo "Found app: $APP_PATH"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ .app not found! Listing build dir:"
+            find ./build -name "*.app" -type d
+            exit 1
+          fi
+
+          # Create Payload structure
+          mkdir -p ./output/Payload
+          cp -r "$APP_PATH" ./output/Payload/
+
+          # Create IPA
+          cd output
+          zip -r ../WebDriverAgent.ipa Payload/
+          cd ..
+
+          echo "✅ IPA created!"
+          ls -lh WebDriverAgent.ipa
+
+      - name: Verify IPA structure
+        run: |
+          cd WebDriverAgent
+          echo "📋 IPA contents:"
+          unzip -l WebDriverAgent.ipa | head -20
+
+      - name: Upload IPA as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgent-IPA
+          path: WebDriverAgent/WebDriverAgent.ipa
+          retention-days: 30
