@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 30
     instance_type: mac_mini_m2
     environment:
-      xcode: latest
+      xcode: 16.2
     scripts:
       - name: Clone WebDriverAgent
         script: |
@@ -12,33 +12,80 @@ workflows:
           cd WebDriverAgent
           echo "WDA version:"
           git log -1 --oneline
+          echo "Xcode version:"
+          xcodebuild -version
 
-      - name: Build WDA
+      - name: Build WDA for iOS Device
         script: |
           cd WebDriverAgent
+          
+          # Build for real iOS devices (arm64)
           xcodebuild build-for-testing \
             -project WebDriverAgent.xcodeproj \
             -scheme WebDriverAgentRunner \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE="" \
+            ARCHS="arm64" \
+            ONLY_ACTIVE_ARCH=NO \
             -derivedDataPath ./build \
-            | tail -30
+            2>&1 | tail -20
+          
+          echo ""
+          echo "=== Build result ==="
+          echo "Exit code: $?"
+          
+          # Find built products
+          echo ""
+          echo "=== Built products ==="
+          find ./build -name "*.app" -type d
+          find ./build -name "*.xctestrun" -type f
 
       - name: Package IPA
         script: |
           cd WebDriverAgent
+          
+          # Find .app
           APP_PATH=$(find ./build -name "WebDriverAgentRunner-Runner.app" -type d | head -1)
-          echo "Found app: $APP_PATH"
-          mkdir -p ./output/Payload
-          cp -r "$APP_PATH" ./output/Payload/
-          cd output
-          zip -r ../WebDriverAgent.ipa Payload/
+          echo "App path: $APP_PATH"
+          
+          # Show app contents
+          echo ""
+          echo "=== App contents ==="
+          ls -la "$APP_PATH/"
+          
+          # Check binary architectures
+          echo ""
+          echo "=== Binary arch ==="
+          lipo -info "$APP_PATH/WebDriverAgentRunner-Runner" 2>/dev/null || echo "No binary found"
+          
+          # Check PlugIns
+          echo ""
+          echo "=== PlugIns ==="
+          ls -la "$APP_PATH/PlugIns/" 2>/dev/null || echo "No PlugIns"
+          
+          # Create IPA with correct structure
+          mkdir -p ./ipa_output/Payload
+          cp -r "$APP_PATH" ./ipa_output/Payload/
+          cd ipa_output
+          zip -r ../WebDriverAgent.ipa Payload/ -x "*.DS_Store"
           cd ..
-          echo "IPA created:"
+          
+          echo ""
+          echo "=== IPA created ==="
           ls -lh WebDriverAgent.ipa
+          
+          # Also keep xctestrun file
+          XCTESTRUN=$(find ./build -name "*.xctestrun" -type f | head -1)
+          if [ -n "$XCTESTRUN" ]; then
+            cp "$XCTESTRUN" ./WebDriverAgentRunner.xctestrun
+            echo "xctestrun copied: $(ls -lh WebDriverAgentRunner.xctestrun)"
+          fi
 
     artifacts:
       - WebDriverAgent/WebDriverAgent.ipa
+      - WebDriverAgent/WebDriverAgentRunner.xctestrun
