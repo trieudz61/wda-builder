@@ -1,0 +1,44 @@
+workflows:
+  build-wda:
+    name: Build WebDriverAgent
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: Clone WebDriverAgent
+        script: |
+          git clone https://github.com/appium/WebDriverAgent.git
+          cd WebDriverAgent
+          echo "WDA version:"
+          git log -1 --oneline
+
+      - name: Build WDA
+        script: |
+          cd WebDriverAgent
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -derivedDataPath ./build \
+            | tail -30
+
+      - name: Package IPA
+        script: |
+          cd WebDriverAgent
+          APP_PATH=$(find ./build -name "WebDriverAgentRunner-Runner.app" -type d | head -1)
+          echo "Found app: $APP_PATH"
+          mkdir -p ./output/Payload
+          cp -r "$APP_PATH" ./output/Payload/
+          cd output
+          zip -r ../WebDriverAgent.ipa Payload/
+          cd ..
+          echo "IPA created:"
+          ls -lh WebDriverAgent.ipa
+
+    artifacts:
+      - WebDriverAgent/WebDriverAgent.ipa
